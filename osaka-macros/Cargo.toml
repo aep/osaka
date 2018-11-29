@@ -1,5 +1,5 @@
 [package]
-name = "osaka"
+name = "osaka-macros"
 version = "0.1.1"
 authors = ["Arvid E. Picciani <aep@exys.org>"]
 edition = "2018"
@@ -8,8 +8,11 @@ license     = "MIT/Apache-2.0"
 repository  = "https://github.com/aep/osaka"
 documentation = "https://docs.rs/osaka"
 
-
+[lib]
+proc-macro = true
 
 [dependencies]
-osaka-macros = "0.1.1"
-mio = "0.6"
+syn         = { version = "0.15.22" , features = ["full", "extra-traits"]}
+quote       = "0.6.10"
+proc-macro2 = "0.4"
+
