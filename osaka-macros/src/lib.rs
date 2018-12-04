@@ -20,7 +20,7 @@ pub fn osaka(_args: TokenStream, input: TokenStream) -> TokenStream {
 
     f.decl.output = match syn::parse(
         (quote! {
-            -> impl Generator<Yield=Again, Return=#output>
+            -> impl ::std::ops::Generator<Yield=::osaka::Again, Return=#output>
         })
         .into(),
     ) {

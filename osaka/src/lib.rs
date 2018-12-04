@@ -106,8 +106,8 @@ where
         for (k, mut v) in mem::replace(&mut self.tasks, HashMap::new()) {
             match unsafe { v.resume() } {
                 GeneratorState::Complete(y) => {
-                    let y = y?;
-                    eprintln!("completed {:?}", y);
+                    let _: () = y?;
+                    break;
                 }
                 GeneratorState::Yielded(y) => {
                     if let Some(y) = y.timeout {
