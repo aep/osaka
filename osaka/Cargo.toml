@@ -2,7 +2,6 @@
 name = "osaka"
 version = "0.1.3"
 authors = ["Arvid E. Picciani <aep@exys.org>"]
-edition = "2018"
 description = "async for rust without the noise"
 license     = "MIT/Apache-2.0"
 repository  = "https://github.com/aep/osaka"

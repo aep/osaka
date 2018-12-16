@@ -3,7 +3,7 @@ use std::ops::Generator;
 use std::time::Instant;
 
 extern crate osaka;
-use core::time::Duration;
+use std::time::Duration;
 use osaka::mio;
 use osaka::mio::net::UdpSocket;
 use osaka::{osaka, Again, Poll};
@@ -89,7 +89,7 @@ pub fn resolve(poll: Poll, names: Vec<String>) -> Result<Vec<String>, Error> {
                 .unwrap();
             send_query(&name, &sock, &to)?;
             let pkt = match loop {
-                yield Again::new(Some(token), Some(Duration::from_secs(5)));
+                yield Again::again(token, Some(Duration::from_secs(5)));
                 if now.elapsed() >= Duration::from_secs(5) {
                     //timeout
                     break None;

@@ -13,7 +13,7 @@ use syn::ItemFn;
 pub fn osaka(_args: TokenStream, input: TokenStream) -> TokenStream {
     let mut f = parse_macro_input!(input as ItemFn);
 
-    let output = match f.decl.output {
+    let output = match f.decl.output.clone() {
         syn::ReturnType::Default => quote! {()},
         syn::ReturnType::Type(_, t) => quote! {#t},
     };
