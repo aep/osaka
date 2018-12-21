@@ -9,6 +9,8 @@ use osaka::mio::net::UdpSocket;
 use osaka::{osaka, Again, Poll};
 use std::mem;
 use std::net::SocketAddr;
+use std::fs::File;
+use std::io::{BufReader, BufRead};
 
 #[derive(Debug)]
 pub enum Error {
@@ -72,14 +74,47 @@ fn send_query(name: &str, sock: &UdpSocket, to: &SocketAddr) -> Result<(), Error
     Ok(())
 }
 
+
+fn get_system_dns_servers() -> Result<Vec<SocketAddr>, Error> {
+    let mut rr = Vec::new();
+
+    let f = File::open("/etc/resolv.conf").map_err(|e|Error::Io(e))?;
+    let f = BufReader::new(f);
+    for line in f.lines() {
+        let line = line.map_err(|e|Error::Io(e))?;
+        let mut line = line.split_whitespace();
+        if line.next() == Some("nameserver") {
+            if let Some(v) = line.next() {
+                if let Ok(v) = v.parse() {
+                    rr.push(v);
+                }
+                let v = format!("{}:53", v);
+                if let Ok(v) = v.parse() {
+                    rr.push(v);
+                }
+            }
+        }
+    }
+
+    Ok(rr)
+}
+
 #[osaka]
 pub fn resolve(poll: Poll, names: Vec<String>) -> Result<Vec<String>, Error> {
-    let dns_servers = vec![
+    let mut dns_servers = vec![
         "1.1.1.1:53".parse().unwrap(),
         "8.8.8.8:53".parse().unwrap(),
         "9.9.9.9:53".parse().unwrap(),
         "78.35.40.149:53".parse().unwrap(),
     ];
+
+    match get_system_dns_servers() {
+        Ok(mut v) => dns_servers.append(&mut v),
+        //Err(e) => warn!("{}",e),
+        Err(e) => (),
+    };
+
+
     for to in dns_servers {
         for name in names.clone() {
             let now = Instant::now();
