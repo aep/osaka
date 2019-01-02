@@ -174,6 +174,10 @@ impl Poll {
         Again { poll: self.poll.clone(), tokens: vec![token], deadline: deadline.map(|v|Instant::now() + v) }
     }
 
+    /// wake up when any of the tokens is ready or after the specified time has passed
+    pub fn any(&self, tokens:Vec<Token>, deadline: Option<Duration>) -> Again {
+        Again { poll: self.poll.clone(), tokens, deadline: deadline.map(|v|Instant::now() + v) }
+    }
 }
 
 

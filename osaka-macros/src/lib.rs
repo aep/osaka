@@ -29,6 +29,7 @@ pub fn osaka(_args: TokenStream, input: TokenStream) -> TokenStream {
     let oblock = f.block;
     f.block = match syn::parse(
         (quote! {{
+            use std::ops::Generator;
             let mut l = move||{
                 #oblock
             };
