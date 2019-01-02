@@ -3,28 +3,42 @@
 
 pub extern crate osaka_macros;
 pub extern crate mio;
+pub extern crate log;
 
 use std::io::Error;
-use std::mem;
 use std::ops::{Generator, GeneratorState};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use log::{warn, debug};
+use std::time::{Duration, Instant};
 
-use std::time::Duration;
-pub use mio::Token;
 pub use osaka_macros::osaka;
 
+/**
+    convenience macro to wait for another future inside an osaka async fn
+
+    if bar is a future that returns a string, for example:
+
+    ```
+    let foo : String = sync!(bar);
+    printfn!("yo! {}", foo);
+    ```
+
+    this is asynchronous and does not block the current thread.
+    Instead it will return the Again activation handle of `bar` if its not ready
+
+*/
 #[macro_export]
 macro_rules! sync {
-    ($x:ident) => {{
-        use std::ops::GeneratorState;
+    ($task:ident) => {{
+        use osaka::FutureResult;
         loop {
-            match unsafe { $x.resume() } {
-                GeneratorState::Complete(y) => {
+            match $task.activate() {
+                FutureResult::Done(y) => {
                     let y = y?;
                     break y;
                 }
-                GeneratorState::Yielded(y) => {
+                FutureResult::Again(y) => {
                     yield y;
                 }
             }
@@ -32,11 +46,86 @@ macro_rules! sync {
     };};
 }
 
-pub struct Again {
-    pub tokens:     Vec<Token>,
-    pub timeout:    Option<Duration>,
+/// an activation token
+#[derive(Clone)]
+pub struct Token {
+    m: mio::Token,
+    active: Arc<AtomicUsize>,
 }
 
+
+/** Activation Handle
+
+Again contains tokens that tell the execution engine when to reactivate this task.
+*/
+
+#[derive(Clone)]
+pub struct Again {
+    tokens:     Vec<Token>,
+    deadline:   Option<Instant>,
+    poll:       Arc<mio::Poll>,
+}
+
+impl Again {
+    pub fn merge(&mut self, mut other: Again) {
+        if let Some(mut t2) = other.deadline {
+            let t = if let Some(ref mut t1) = self.deadline {
+                if t1 > &mut t2 {
+                    true
+                } else {
+                    false
+                }
+            } else {
+                true
+            };
+            if t {
+                self.deadline = Some(t2);
+            }
+        }
+        self.tokens.append(&mut other.tokens);
+    }
+}
+
+/// It's either done or we'll try again later
+pub enum FutureResult<F> {
+    Done(F),
+    Again(Again),
+}
+
+/// something that can be resumed
+pub trait Future<R> {
+    fn poll(&mut self) -> FutureResult<R>;
+}
+
+/*
+impl<R,X> Future<R> for X
+where X: FnMut() -> FutureResult<R> {
+    fn poll(&mut self) -> FutureResult<R> {
+        (self)()
+    }
+}
+*/
+
+impl<R,X> Future<R> for X
+where X: Generator<Yield = Again, Return = R>
+{
+    fn poll(&mut self) -> FutureResult<R> {
+        match unsafe { self.resume() } {
+            GeneratorState::Complete(y) => {
+                FutureResult::Done(y)
+            }
+            GeneratorState::Yielded(a) => {
+                FutureResult::Again(a)
+            }
+        }
+    }
+}
+
+
+/**
+  Task execution engine.
+
+ */
 #[derive(Clone)]
 pub struct Poll {
     tokens: Arc<AtomicUsize>,
@@ -44,6 +133,7 @@ pub struct Poll {
 }
 
 impl Poll {
+    /// register a mio::Evented as a wake up source
     pub fn register<E: ?Sized>(
         &self,
         handle: &E,
@@ -55,110 +145,186 @@ impl Poll {
     {
         let token = mio::Token(self.tokens.fetch_add(1, Ordering::SeqCst));
         self.poll.register(handle, token, interest, opts)?;
-        Ok(token)
-    }
-}
-
-impl Again {
-    pub fn empty() -> Self {
-        Self { tokens: Vec::new(), timeout: None }
+        Ok(Token{
+            m: token,
+            active: Arc::new(AtomicUsize::new(0)),
+        })
     }
 
-    pub fn later(timeout: Duration) -> Self {
-        Self { tokens: Vec::new(), timeout: Some(timeout)}
-    }
-
-    pub fn again(token: Token, timeout: Option<Duration>) -> Self {
-        Self { tokens: vec![token], timeout }
-    }
-
-    pub fn merge(&mut self, mut other: Again) {
-        if let Some(mut t2) = other.timeout {
-            let t = if let Some(ref mut t1) = self.timeout {
-                if t1 > &mut t2 {
-                    true
-                } else {
-                    false
-                }
-            } else {
-                true
-            };
-            if t {
-                self.timeout = Some(t2);
-            }
-        }
-
-        self.tokens.append(&mut other.tokens);
-    }
-}
-
-pub struct Executor<Error> {
-    exit:       bool,
-    tokens:     Arc<AtomicUsize>,
-    poll:       Arc<mio::Poll>,
-    tasks:      Vec<Box<Generator<Yield = Again, Return = Result<(), Error>>>>,
-    timeout:    Option<Duration>,
-}
-
-impl<Error> Executor<Error>
-where
-    Error: core::fmt::Debug,
-{
-    pub fn new() -> Executor<Error> {
-        let poll = Arc::new(mio::Poll::new().unwrap());
-
+    /// create an execution engine
+    pub fn new() -> Self {
         Self {
-            exit: false,
-            tokens: Arc::new(AtomicUsize::new(1)),
-            poll,
-            tasks: Vec::default(),
-            timeout: None,
+            tokens: Arc::new(AtomicUsize::new(0)),
+            poll:   Arc::new(mio::Poll::new().unwrap()),
         }
     }
 
-    pub fn with<X, F>(&mut self, f: F)
-    where
-        X: 'static + Generator<Yield = Again, Return = Result<(), Error>> + Sized,
-        F: FnOnce(Poll) -> X,
-    {
-        let fx = f(Poll {
-            tokens: self.tokens.clone(),
-            poll: self.poll.clone(),
-        });
-        self.tasks.push(Box::new(fx));
+    /// returns an Again that will never be activated because it contains no wakeup sources
+    pub fn never(&self) -> Again {
+        Again { poll: self.poll.clone(), tokens: Vec::new(), deadline: None }
     }
 
-    pub fn activate(&mut self) -> Result<(), Error> {
-        self.timeout = None;
-        for mut v in mem::replace(&mut self.tasks, Vec::new()) {
-            match unsafe { v.resume() } {
-                GeneratorState::Complete(y) => {
-                    let _: () = y?;
-                    break;
-                }
-                GeneratorState::Yielded(y) => {
-                    if let Some(y) = y.timeout {
-                        self.timeout = Some(y);
-                    }
-                    self.tasks.push(v);
-                }
-            }
-        }
-        if self.tasks.is_empty() {
-            self.exit = true;
-        }
-        Ok(())
+    /// wake up after the specified time has passed
+    pub fn later(&self, deadline: Duration) -> Again {
+        Again { poll: self.poll.clone(), tokens: Vec::new(), deadline: Some(Instant::now() + deadline)}
     }
 
-    pub fn run(&mut self) -> Result<(), Error> {
+    /// wake up either when the token is ready or after the specified time has passed
+    pub fn again(&self, token: Token, deadline: Option<Duration>) -> Again {
+        Again { poll: self.poll.clone(), tokens: vec![token], deadline: deadline.map(|v|Instant::now() + v) }
+    }
+
+}
+
+
+/**
+Something that can be activated
+
+An osaka task is usually constructed by adding the osaka macro to a function, like so:
+
+```
+#[osaka]
+fn the_answer(poll: osaka::Poll) -> u32 {
+    let oracle = Oracle{};
+    let token = poll.register(oracle);
+    if oracle.is_ready() {
+        return 42;
+    } else {
+        yield poll.again(token);
+    }
+}
+```
+
+*/
+pub struct Task<R> {
+    f: Box<Future<R>>,
+    a: Again,
+}
+
+impl<R> Task<R> {
+
+    /// run a task to completion, blocking the current thread.
+    ///
+    /// this is not re-entrant, meaning you cannot call this function from some callback.
+    /// It is also not thread safe. Basically only ever call this once, prefferably in main.
+    pub fn run(&mut self) -> R {
         let mut events = mio::Events::with_capacity(1024);
         loop {
-            self.activate()?;
-            if self.exit {
-                break;
+            let mut timeout = None;
+            if let Some(deadline) = self.a.deadline {
+                let now = Instant::now();
+                if now > deadline {
+                    warn!("deadline already expired. will loop in 1ms");
+                    timeout = Some(Duration::from_millis(1));
+                } else {
+                    timeout = Some(deadline - now);
+                }
             }
-            self.poll.poll(&mut events, self.timeout).unwrap();
+
+            if self.a.tokens.len() == 0 {
+                panic!("trying to run() with 0 tokens, this is not going to do anything useful.\n
+                       forgot to pass a token with poll.again() ?");
+            }
+
+
+            debug!("going to poll with timeout {:?} and {} tokens",
+                  timeout,
+                  self.a.tokens.len());
+
+            self.a.poll.poll(&mut events, timeout).expect("poll");
+
+            for token in &self.a.tokens {
+                token.active.store(0, Ordering::SeqCst);
+            }
+            for event in &events {
+                for token in &self.a.tokens {
+                    if event.token() == token.m {
+                        debug!("token {:?} activated", token.m);
+                        token.active.store(1, Ordering::SeqCst);
+                    }
+                }
+            }
+
+            if let FutureResult::Done(v) = self.activate() {
+                return v;
+            }
         }
-        Ok(())
     }
+
+    /// the brave may construct a Task manually from a Future
+    ///
+    /// the passed Again instance needs to already contain an activation source,
+    /// or the task will never be executed
+    ///
+    ///
+    /// for example:
+    ///
+    /// ```
+    /// struct Santa {
+    ///     poll: Poll
+    /// }
+    ///
+    /// impl Future for Santa {
+    ///     fn poll(&mut self) -> FutureResult<Present> {
+    ///         FutureResult::Again(self.poll.never())
+    ///     }
+    /// }
+    ///
+    /// fn main() {
+    ///     let poll = Poll::new();
+    ///     let santa = Santa{poll};
+    ///     santa.run().unwrap();
+    /// }
+    ///
+    /// ```
+    pub fn new(f: Box<Future<R>>, a: Again) -> Self {
+        Self {f,a}
+    }
+
+    /// this is called by the execution engine, or a sync macro.
+    ///
+    /// you can call this by hand, but it won't actually do anything unless the task
+    /// contains a token that is ready, or has an expired deadline
+    pub fn activate(&mut self) -> FutureResult<R> {
+        let mut ready = false;
+
+        if let Some(deadline) = self.a.deadline {
+            if Instant::now() >= deadline {
+                debug!("task wakeup caused by deadline");
+                self.a.deadline = None;
+                ready = true;
+            }
+        }
+
+        if !ready {
+            for token in &self.a.tokens {
+                if token.active.load(Ordering::SeqCst) > 0 {
+                    debug!("task wakeup caused by token readyness");
+                    ready = true;
+                    break;
+                }
+            }
+        }
+
+        if ready {
+            match self.f.poll() {
+                FutureResult::Done(y) => {
+                    return FutureResult::Done(y);
+                },
+                FutureResult::Again(a) => {
+                    self.a = a;
+                }
+            }
+        }
+
+        FutureResult::Again(self.a.clone())
+    }
+
+
+    /// force a wakeup the next time `activate` is called. This is for a poor implementation of
+    /// channels and you should probably not use this.
+    pub fn wakeup_now(&mut self)  {
+        self.a.deadline = Some(Instant::now());
+    }
+
 }

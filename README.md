@@ -44,22 +44,85 @@ in real code you will probably want to register something to a Poll instance to 
 ```rust
 #[osaka]
 pub fn something(poll: Poll) -> Result<Vec<String>, std::io::Error> {
-    let sock = mio::UdpSocket::bind(&"0.0.0.0:0".parse().unwrap())?;
-    let token = poll.register(&sock, mio::Ready::readable(), mio::PollOpt::level()).unwrap();
+    let sock    = mio::UdpSocket::bind(&"0.0.0.0:0".parse().unwrap())?;
+    let token   = poll.register(&sock, mio::Ready::readable(), mio::PollOpt::level()).unwrap();
 
     loop {
         let mut buf = vec![0; 1024];
         if let Err(e) = sock.recv_from(&mut buf) {
             if e.kind() == std::io::ErrorKind::WouldBlock {
-                yield Again::again(token, None);
+                yield poll.again(token, Some(Duration::from_secs(1)));
             }
         }
     }
 }
+
+pub fn main() {
+    let poll = osaka::Poll::new();
+    something(poll).run().unwrap();
+}
+
 ```
 
-note that there is no singleton runtime in the background. poll is explicitly passed as argument. 
+note that there is no singleton runtime in the background.
+the entire executor (poll) is explicitly passed as argument.
 osaka is significantly more simplistic than futures.rs on purpose.
+
+
+here's some actual code from osaka-dns:
+```rust
+#[osaka]
+pub fn resolve(poll: Poll, names: Vec<String>) -> Result<Vec<String>, Error> {
+    //...
+    let sock = UdpSocket::bind(&"0.0.0.0:0".parse().unwrap()).map_err(|e| Error::Io(e))?;
+    let token = poll
+        .register(&sock, mio::Ready::readable(), mio::PollOpt::level())
+        .unwrap();
+    //...
+
+    // wait for a packet
+    let pkt = match loop {
+        // wait for the token to be ready, or timeout
+        yield poll.again(token.clone(), Some(Duration::from_secs(5)));
+        if now.elapsed() >= Duration::from_secs(5) {
+            // timeout
+            break None;
+        }
+        // now the socket _should_ be ready
+        let (len, from) = match sock.recv_from(&mut buf) {
+            Ok(v) => v,
+            Err(e) => {
+                // but just in case it isn't lets re-loop
+                if e.kind() == std::io::ErrorKind::WouldBlock {
+                    continue;
+                }
+                return Err(Error::Io(e));
+            }
+        };
+    }
+
+    // do stuff with the pkt
+    // ...
+}
+
+pub fn test(poll: Poll) -> Result<(), Error> {
+    let mut a = resolve(
+        poll.clone(),
+        vec![
+            "3.carrier.devguard.io".into(),
+        ],
+    );
+    let y = osaka::sync!(a);
+    println!("resolved: {:?}", y);
+    Ok(())
+}
+
+pub fn main() {
+    tinylogger::init().ok();
+    let poll = osaka::Poll::new();
+    test(poll).run().unwrap();
+}
+```
 
 
 differences to async/await

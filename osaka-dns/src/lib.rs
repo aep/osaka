@@ -124,7 +124,7 @@ pub fn resolve(poll: Poll, names: Vec<String>) -> Result<Vec<String>, Error> {
                 .unwrap();
             send_query(&name, &sock, &to)?;
             let pkt = match loop {
-                yield Again::again(token, Some(Duration::from_secs(5)));
+                yield poll.again(token.clone(), Some(Duration::from_secs(5)));
                 if now.elapsed() >= Duration::from_secs(5) {
                     //timeout
                     break None;
@@ -229,6 +229,9 @@ pub fn resolve(poll: Poll, names: Vec<String>) -> Result<Vec<String>, Error> {
     Err(Error::OutOfOptions)
 }
 
+#[cfg(test)]
+extern crate tinylogger;
+
 #[osaka]
 #[cfg(test)]
 pub fn r(poll: Poll) -> Result<(), Error> {
@@ -246,7 +249,7 @@ pub fn r(poll: Poll) -> Result<(), Error> {
 
 #[test]
 pub fn main() {
-    let mut ex = osaka::Executor::new();
-    ex.with(|poll| r(poll));
-    ex.run().unwrap();
+    tinylogger::init().ok();
+    let poll   = osaka::Poll::new();
+    r(poll).run().unwrap();
 }
