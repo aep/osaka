@@ -30,12 +30,12 @@ pub use osaka_macros::osaka;
 */
 #[macro_export]
 macro_rules! sync {
-    ($task:ident) => {{
+    ($task:expr) => {{
         use osaka::FutureResult;
+        use osaka::Future;
         loop {
-            match $task.activate() {
+            match $task.poll() {
                 FutureResult::Done(y) => {
-                    let y = y?;
                     break y;
                 }
                 FutureResult::Again(y) => {
@@ -44,6 +44,16 @@ macro_rules! sync {
             }
         }
     };};
+}
+
+#[macro_export]
+macro_rules! try{
+    ($e:expr) => {
+        match $e {
+            Err(e) => return $crate::FutureResult::Done(Err(e.into())),
+            Ok(v) => v,
+        }
+    }
 }
 
 /// an activation token
@@ -249,7 +259,7 @@ impl<R> Task<R> {
                 }
             }
 
-            if let FutureResult::Done(v) = self.activate() {
+            if let FutureResult::Done(v) = self.poll() {
                 return v;
             }
         }
@@ -285,11 +295,22 @@ impl<R> Task<R> {
         Self {f,a}
     }
 
+
+
+    /// force a wakeup the next time `activate` is called. This is for a poor implementation of
+    /// channels and you should probably not use this.
+    pub fn wakeup_now(&mut self)  {
+        self.a.deadline = Some(Instant::now());
+    }
+
+}
+
+impl<R> Future<R> for Task<R> {
     /// this is called by the execution engine, or a sync macro.
     ///
     /// you can call this by hand, but it won't actually do anything unless the task
     /// contains a token that is ready, or has an expired deadline
-    pub fn activate(&mut self) -> FutureResult<R> {
+    fn poll(&mut self) -> FutureResult<R> {
         let mut ready = false;
 
         if let Some(deadline) = self.a.deadline {
@@ -323,12 +344,4 @@ impl<R> Task<R> {
 
         FutureResult::Again(self.a.clone())
     }
-
-
-    /// force a wakeup the next time `activate` is called. This is for a poor implementation of
-    /// channels and you should probably not use this.
-    pub fn wakeup_now(&mut self)  {
-        self.a.deadline = Some(Instant::now());
-    }
-
 }

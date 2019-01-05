@@ -1,6 +1,6 @@
 [package]
 name = "osaka-dns"
-version = "0.2.0"
+version = "0.2.5"
 authors = ["Arvid E. Picciani <aep@exys.org>"]
 description = "async for rust without the noise"
 license     = "MIT/Apache-2.0"
@@ -8,7 +8,7 @@ repository  = "https://github.com/aep/osaka"
 documentation = "https://docs.rs/osaka-dns"
 
 [dependencies]
-osaka = "0.2"
+osaka = "0.2.5"
 #osaka = {path = "../osaka"}
 
 
