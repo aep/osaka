@@ -8,8 +8,8 @@ repository  = "https://github.com/aep/osaka"
 documentation = "https://docs.rs/osaka-dns"
 
 [dependencies]
-osaka = "0.2.5"
-#osaka = {path = "../osaka"}
+#osaka = "0.2.5"
+osaka = {path = "../osaka"}
 
 
 [dev-dependencies]

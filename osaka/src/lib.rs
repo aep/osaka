@@ -131,7 +131,6 @@ where X: Generator<Yield = Again, Return = R>
     }
 }
 
-
 /**
   Task execution engine.
 
@@ -210,9 +209,14 @@ fn the_answer(poll: osaka::Poll) -> u32 {
 ```
 
 */
-pub struct Task<R> {
-    f: Box<Future<R>>,
-    a: Again,
+pub enum Task<R> {
+    Later {
+        f: Box<Future<R>>,
+        a: Again,
+    },
+    Immediate {
+        r: Option<R>,
+    }
 }
 
 impl<R> Task<R> {
@@ -222,43 +226,50 @@ impl<R> Task<R> {
     /// this is not re-entrant, meaning you cannot call this function from some callback.
     /// It is also not thread safe. Basically only ever call this once, prefferably in main.
     pub fn run(&mut self) -> R {
-        let mut events = mio::Events::with_capacity(1024);
         loop {
-            let mut timeout = None;
-            if let Some(deadline) = self.a.deadline {
-                let now = Instant::now();
-                if now > deadline {
-                    warn!("deadline already expired. will loop in 1ms");
-                    timeout = Some(Duration::from_millis(1));
-                } else {
-                    timeout = Some(deadline - now);
+            match self {
+                Task::Immediate{r} =>  {
+                    return r.take().expect("immediate polled after completion");
                 }
-            }
-
-            if self.a.tokens.len() == 0 {
-                panic!("trying to run() with 0 tokens, this is not going to do anything useful.\n
-                       forgot to pass a token with poll.again() ?");
-            }
-
-
-            debug!("going to poll with timeout {:?} and {} tokens",
-                  timeout,
-                  self.a.tokens.len());
-
-            self.a.poll.poll(&mut events, timeout).expect("poll");
-
-            for token in &self.a.tokens {
-                token.active.store(0, Ordering::SeqCst);
-            }
-            for event in &events {
-                for token in &self.a.tokens {
-                    if event.token() == token.m {
-                        debug!("token {:?} activated", token.m);
-                        token.active.store(1, Ordering::SeqCst);
+                Task::Later{f,a} =>  {
+                    let mut events = mio::Events::with_capacity(1024);
+                    let mut timeout = None;
+                    if let Some(deadline) = a.deadline {
+                        let now = Instant::now();
+                        if now > deadline {
+                            warn!("deadline already expired. will loop in 1ms");
+                            timeout = Some(Duration::from_millis(1));
+                        } else {
+                            timeout = Some(deadline - now);
+                        }
                     }
+
+                    if a.tokens.len() == 0 {
+                        panic!("trying to run() with 0 tokens, this is not going to do anything useful.\n
+                       forgot to pass a token with poll.again() ?");
+                    }
+
+
+                    debug!("going to poll with timeout {:?} and {} tokens",
+                           timeout,
+                           a.tokens.len());
+
+                    a.poll.poll(&mut events, timeout).expect("poll");
+
+                    for token in &a.tokens {
+                        token.active.store(0, Ordering::SeqCst);
+                    }
+                    for event in &events {
+                        for token in &a.tokens {
+                            if event.token() == token.m {
+                                debug!("token {:?} activated", token.m);
+                                token.active.store(1, Ordering::SeqCst);
+                            }
+                        }
+                    }
+
                 }
             }
-
             if let FutureResult::Done(v) = self.poll() {
                 return v;
             }
@@ -292,7 +303,7 @@ impl<R> Task<R> {
     ///
     /// ```
     pub fn new(f: Box<Future<R>>, a: Again) -> Self {
-        Self {f,a}
+        Task::Later{f,a}
     }
 
 
@@ -300,7 +311,14 @@ impl<R> Task<R> {
     /// force a wakeup the next time `activate` is called. This is for a poor implementation of
     /// channels and you should probably not use this.
     pub fn wakeup_now(&mut self)  {
-        self.a.deadline = Some(Instant::now());
+        if let Task::Later{f,a} = self {
+            a.deadline = Some(Instant::now());
+        }
+    }
+
+
+    pub fn immediate(t:R) -> Task<R> {
+        Task::Immediate{r:Some(t)}
     }
 
 }
@@ -311,37 +329,44 @@ impl<R> Future<R> for Task<R> {
     /// you can call this by hand, but it won't actually do anything unless the task
     /// contains a token that is ready, or has an expired deadline
     fn poll(&mut self) -> FutureResult<R> {
-        let mut ready = false;
-
-        if let Some(deadline) = self.a.deadline {
-            if Instant::now() >= deadline {
-                debug!("task wakeup caused by deadline");
-                self.a.deadline = None;
-                ready = true;
+        match self {
+            Task::Immediate{r} =>  {
+                return FutureResult::Done(r.take().expect("immediate polled after completion"));
             }
-        }
+            Task::Later{f,a} =>  {
+                let mut ready = false;
 
-        if !ready {
-            for token in &self.a.tokens {
-                if token.active.load(Ordering::SeqCst) > 0 {
-                    debug!("task wakeup caused by token readyness");
-                    ready = true;
-                    break;
+                if let Some(deadline) = a.deadline {
+                    if Instant::now() >= deadline {
+                        debug!("task wakeup caused by deadline");
+                        a.deadline = None;
+                        ready = true;
+                    }
                 }
-            }
-        }
 
-        if ready {
-            match self.f.poll() {
-                FutureResult::Done(y) => {
-                    return FutureResult::Done(y);
-                },
-                FutureResult::Again(a) => {
-                    self.a = a;
+                if !ready {
+                    for token in &a.tokens {
+                        if token.active.load(Ordering::SeqCst) > 0 {
+                            debug!("task wakeup caused by token readyness");
+                            ready = true;
+                            break;
+                        }
+                    }
                 }
+
+                if ready {
+                    match f.poll() {
+                        FutureResult::Done(y) => {
+                            return FutureResult::Done(y);
+                        },
+                        FutureResult::Again(a2) => {
+                            *a = a2;
+                        }
+                    }
+                }
+
+                FutureResult::Again(a.clone())
             }
         }
-
-        FutureResult::Again(self.a.clone())
     }
 }

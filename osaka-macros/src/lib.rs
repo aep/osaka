@@ -35,8 +35,8 @@ pub fn osaka(_args: TokenStream, input: TokenStream) -> TokenStream {
             };
 
             let a = match unsafe { l.resume() } {
-                std::ops::GeneratorState::Complete(_) => {
-                    panic!("somehow the generator completed immediately");
+                std::ops::GeneratorState::Complete(y) => {
+                    return osaka::Task::immediate(y);
                 }
                 std::ops::GeneratorState::Yielded(y) => {
                     y
