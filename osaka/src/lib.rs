@@ -1,5 +1,6 @@
 #![feature(generators, generator_trait)]
 #![feature(custom_attribute)]
+#![feature(termination_trait_lib)]
 
 pub extern crate osaka_macros;
 pub extern crate mio;
@@ -366,6 +367,21 @@ impl<R> Future<R> for Task<R> {
                 }
 
                 FutureResult::Again(a.clone())
+            }
+        }
+    }
+}
+
+
+
+
+impl<E:  std::fmt::Debug> std::process::Termination for Task<Result<(), E>> {
+    fn report(mut self) -> i32 {
+        match self.run() {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("{:?}", e);
+                2
             }
         }
     }
