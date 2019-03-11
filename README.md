@@ -1,4 +1,4 @@
-DEAD PROJECT
+THIS IS A DEAD END
 ========
 
 Sad to say that after evaluating rusts vision versus ours, we have decided to no longer invest into rust.
