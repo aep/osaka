@@ -1,3 +1,16 @@
+DEAD PROJECT
+========
+
+Sad to say that after evaluating rusts vision versus ours, we have decided to no longer invest into rust.
+osaka is an important building block in devguard.io, but there will be no updates to make it usable for the general public.
+
+
+
+-----
+
+
+
+
 osaka is async for rust, inspired by go and the clay programming language
 
 Its designed around continuations rather than combinators,
