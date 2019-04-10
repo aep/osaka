@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use log::{warn, debug};
 use std::time::{Duration, Instant};
+use std::pin::Pin;
 
 pub use osaka_macros::osaka;
 
@@ -118,10 +119,10 @@ where X: FnMut() -> FutureResult<R> {
 */
 
 impl<R,X> Future<R> for X
-where X: Generator<Yield = Again, Return = R>
+where X: Generator<Yield = Again, Return = R> + Unpin
 {
     fn poll(&mut self) -> FutureResult<R> {
-        match unsafe { self.resume() } {
+        match Pin::new(self).resume() {
             GeneratorState::Complete(y) => {
                 FutureResult::Done(y)
             }

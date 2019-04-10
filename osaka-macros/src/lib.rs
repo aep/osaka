@@ -29,12 +29,13 @@ pub fn osaka(_args: TokenStream, input: TokenStream) -> TokenStream {
     let oblock = f.block;
     f.block = match syn::parse(
         (quote! {{
+            use std::pin::Pin;
             use std::ops::Generator;
-            let mut l = move||{
+            let mut l = Box::new(move||{
                 #oblock
-            };
+            });
 
-            let a = match unsafe { l.resume() } {
+            let a = match Pin::new(l.as_mut()).resume() {
                 std::ops::GeneratorState::Complete(y) => {
                     return osaka::Task::immediate(y);
                 }
@@ -42,7 +43,7 @@ pub fn osaka(_args: TokenStream, input: TokenStream) -> TokenStream {
                     y
                 }
             };
-            osaka::Task::new(Box::new(l),a)
+            osaka::Task::new(l,a)
         }})
         .into(),
     ) {
