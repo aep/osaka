@@ -1,6 +1,6 @@
 [package]
 name = "osaka"
-version = "0.2.7"
+version = "0.2.10"
 authors = ["Arvid E. Picciani <aep@exys.org>"]
 description = "async for rust without the noise"
 license     = "MIT/Apache-2.0"
@@ -11,7 +11,7 @@ readme = "../README.md"
 
 
 [dependencies]
-#osaka-macros = "0.2"
-osaka-macros = { path ="../osaka-macros"}
+osaka-macros = "=0.2.10"
+#osaka-macros = { path ="../osaka-macros"}
 mio = "0.6"
 log = "0.4"
