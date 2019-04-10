@@ -42,7 +42,7 @@ fn send_query(name: &str, sock: &UdpSocket, to: &SocketAddr) -> Result<(), Error
     pkt.queries = 1u16.to_be();
     pkt.answers = 0;
     pkt.authorities = 0;
-    pkt.additionals = 0;
+    pkt.additionals = 1u16.to_be();
 
     if name.as_bytes().len() > 512 {
         return Err(Error::NameTooLong);
@@ -68,6 +68,18 @@ fn send_query(name: &str, sock: &UdpSocket, to: &SocketAddr) -> Result<(), Error
         0,    //16bit padding
         1,    //inet class
     ]);
+
+    // opt
+    payload.extend(&[
+        0,              // root
+        0,      0x29,   // type OPT
+        0x03,   0xe8,   // 1000 bytes max response size
+        0,    // dunno
+        0,    // some other stuff
+        0, 0, // security flags i thing
+        0, 0, // no more data
+    ]);
+
 
     sock.send_to(&payload, &to).unwrap();
 
@@ -238,7 +250,7 @@ pub fn r(poll: Poll) -> Result<(), Error> {
     let mut a = resolve(
         poll.clone(),
         vec![
-            "3.carrier.devguard.io".into(),
+            "4.carrier.devguard.io".into(),
             "x.carrier.devguard.io".into(),
         ],
     );

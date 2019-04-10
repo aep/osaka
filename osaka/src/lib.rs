@@ -239,7 +239,7 @@ impl<R> Task<R> {
                     if let Some(deadline) = a.deadline {
                         let now = Instant::now();
                         if now > deadline {
-                            warn!("deadline already expired. will loop in 1ms");
+                            log::trace!("deadline already expired. will loop in 1ms");
                             timeout = Some(Duration::from_millis(1));
                         } else {
                             timeout = Some(deadline - now);
