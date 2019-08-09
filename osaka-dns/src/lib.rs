@@ -2,7 +2,9 @@
 use std::ops::Generator;
 use std::time::Instant;
 
+extern crate log;
 extern crate osaka;
+
 use std::time::Duration;
 use osaka::mio;
 use osaka::mio::net::UdpSocket;
@@ -81,6 +83,7 @@ fn send_query(name: &str, sock: &UdpSocket, to: &SocketAddr) -> Result<(), Error
     ]);
 
 
+    log::debug!("attemping to resolve via {}", to);
     sock.send_to(&payload, &to).unwrap();
 
     Ok(())
@@ -136,7 +139,7 @@ pub fn resolve(poll: Poll, names: Vec<String>) -> Result<Vec<String>, Error> {
                 .unwrap();
             send_query(&name, &sock, &to)?;
             let pkt = match loop {
-                yield poll.again(token.clone(), Some(Duration::from_secs(5)));
+                yield poll.again(token.clone(), Some(Duration::from_secs(2)));
                 if now.elapsed() >= Duration::from_secs(5) {
                     //timeout
                     break None;
