@@ -1,4 +1,4 @@
-#![feature(generators, generator_trait, custom_attribute)]
+#![feature(generators, generator_trait)]
 use std::ops::Generator;
 use std::time::Instant;
 

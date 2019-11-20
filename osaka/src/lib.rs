@@ -1,5 +1,5 @@
-#![feature(generators, generator_trait)]
-#![feature(custom_attribute)]
+#![feature(generators, generator_trait, register_attr)]
+#![register_attr(osaka)]
 #![feature(termination_trait_lib)]
 
 pub extern crate osaka_macros;
